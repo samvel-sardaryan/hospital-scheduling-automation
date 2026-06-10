@@ -1,4 +1,4 @@
-import json, random
+import json, random, re
 from datetime import datetime, timedelta
 
 doctors = [
@@ -9,13 +9,16 @@ doctors = [
     {"id": "D005", "name": "Dr. Mariam Sargsyan", "specialty": "ENT"},
 ]
 
-# availability
-base = datetime.now().replace(hour=0, minute=0, second=0, microsecond=0)
+# availability (skip any slot that is already in the past)
+now = datetime.now()
+base = now.replace(hour=0, minute=0, second=0, microsecond=0)
 slots = []
 for day_offset in range(0, 3):
     day = base + timedelta(days=day_offset)
     for hour in (9, 14):
-        slots.append((day + timedelta(hours=hour)).isoformat())
+        t = day + timedelta(hours=hour)
+        if t > now:
+            slots.append(t.isoformat())
 
 doctor_availability = {d["id"]: list(slots) for d in doctors}
 
@@ -32,18 +35,22 @@ for s,kws in SPECIALTY_KEYWORDS.items():
     for kw in kws:
         kw_to_spec[kw] = s
 
+def matches(keyword, text):
+    # match keywords at the start of a word so "ear" doesn't fire on "heart"
+    return re.search(r"\b" + re.escape(keyword), text) is not None
+
 def classify_symptoms(text):
     t = text.lower()
     counts = {}
     for kw,spec in kw_to_spec.items():
-        if kw in t:
+        if matches(kw, t):
             counts[spec] = counts.get(spec,0) + 1
     return max(counts, key=counts.get) if counts else "General Practitioner"
 
 def detect_urgency(text):
     urgent = ["chest pain", "bleeding", "difficulty breathing", "severe", "unconscious"]
     t = text.lower()
-    return "urgent" if any(u in t for u in urgent) else "routine"
+    return "urgent" if any(matches(u, t) for u in urgent) else "routine"
 
 def schedule_appointment(patient, text):
     spec = classify_symptoms(text)
@@ -85,6 +92,8 @@ examples = [
 ]
 
 appointments = []
+# schedule urgent patients first so they get the earliest available slots
+examples.sort(key=lambda e: detect_urgency(e["text"]) != "urgent")
 for e in examples:
     res = schedule_appointment({"name": e["name"], "phone": e["phone"]}, e["text"])
     if res["status"] == "ok":
